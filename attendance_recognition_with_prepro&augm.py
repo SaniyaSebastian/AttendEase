@@ -107,51 +107,7 @@ def preprocess_image(image):
 # In[7]:
 
 
-# def detect_and_recognize_faces(image):
-#     # Preprocess the image
-#     preprocessed_image = preprocess_image(image)
-    
-#     # Convert BGR image to RGB
-#     image_rgb = cv2.cvtColor(preprocessed_image, cv2.COLOR_BGR2RGB)
-    
-#     # Detect faces using MTCNN
-#     detections = detector.detect_faces(image_rgb)
-    
-#     # Draw bounding boxes around detected faces
-#     for detection in detections:
-#         x, y, w, h = detection['box']
-#         cv2.rectangle(image, (x, y), (x+w, y+h), (255, 100, 203), 2) # Draw bounding box
-        
-#         # Extract face and resize
-#         face = image_rgb[y:y+h, x:x+w]
-#         resized_face = cv2.resize(face, (160, 160))
-        
-#         # Convert to tensor and normalize
-#         normalized_face = resized_face / 255.0
-#         tensor_face = torch.from_numpy(normalized_face.transpose((2, 0, 1))).unsqueeze(0).float()
-        
-#         # Generate embedding using FaceNet
-#         with torch.no_grad():
-#             detected_embedding = resnet(tensor_face).detach().numpy().flatten()
-        
-#         # Compare detected embedding with known embeddings
-#         similarities = cosine_similarity([detected_embedding], known_embeddings)
-#         max_similarity_index = np.argmax(similarities)
-#         max_similarity = similarities[0, max_similarity_index]
-        
-#         # Determine identity based on similarity threshold
-#         if max_similarity > 0.7:  # Adjust threshold as needed
-#             identity = embeddings_df.iloc[max_similarity_index]['label']
-#             text = f"Id: {identity}"
-#             update_recognized_faces(identity)  # Update recognized identities
-        
-#         else:
-#             text = "Id: Unknown"
-        
-#         # Draw text on the image
-#         cv2.putText(image, text, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
-    
-#     return image
+
 
 
 # DELAY OF 4 SECS
@@ -273,19 +229,6 @@ write_to_csv()
 write_to_excel()
 
 
-# In[ ]:
-
-
-
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
 
 
 
