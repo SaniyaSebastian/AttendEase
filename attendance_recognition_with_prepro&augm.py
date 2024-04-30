@@ -8,9 +8,6 @@
 # In[14]:
 
 
-get_ipython().system('pip install opencv-python')
-get_ipython().system('pip install tensorflow')
-
 
 # In[1]:
 
