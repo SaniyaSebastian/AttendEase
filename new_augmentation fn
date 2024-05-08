@@ -1,0 +1,19 @@
+import random
+from PIL import Image
+from torchvision.transforms.functional import crop, rotate, hflip
+
+def apply_augmentations(image, crop_size=(160, 160)):
+    # Random cropping
+    crop_left = random.randint(0, max(0, image.width - crop_size[0]))
+    crop_top = random.randint(0, max(0, image.height - crop_size[1]))
+    image = crop(image, crop_top, crop_left, crop_size[1], crop_size[0])
+
+    # Random rotation (-10 to 10 degrees)
+    angle = random.uniform(-10, 10)
+    image = rotate(image, angle)
+
+    # Random horizontal flipping
+    if random.random() < 0.5:
+        image = hflip(image)
+
+    return image
