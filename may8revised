@@ -1,0 +1,179 @@
+import streamlit as st
+import cv2
+from PIL import ImageEnhance, Image, ImageFilter
+import numpy as np
+import time
+import os
+import pandas as pd
+import torch
+from mtcnn import MTCNN
+from facenet_pytorch import InceptionResnetV1
+from sklearn.metrics.pairwise import cosine_similarity
+import csv
+import random
+from torchvision.transforms import functional as F
+
+# Initialize MTCNN for face detection
+detector = MTCNN()
+
+# Initialize FaceNet model
+resnet = InceptionResnetV1(pretrained='vggface2').eval()
+
+# Function to preprocess image
+def preprocess_image(image):
+    gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    blurred_image = cv2.GaussianBlur(gray_image, (5, 5), 0)
+    equalized_image = cv2.equalizeHist(blurred_image)
+    gamma = 1.5
+    corrected_image = np.uint8(cv2.pow(equalized_image / 255.0, gamma) * 255)
+    enhanced_image = cv2.cvtColor(corrected_image, cv2.COLOR_GRAY2BGR)
+    return enhanced_image
+
+# Function to detect and recognize faces
+def detect_and_recognize_faces(image, embeddings_df, known_embeddings, detector, resnet):
+    detections = detector.detect_faces(image)
+
+    recognized_faces = {}
+    for detection in detections:
+        x, y, w, h = detection['box']
+        face = image[y:y + h, x:x + w]
+        resized_face = cv2.resize(face, (160, 160))
+        normalized_face = resized_face / 255.0
+        tensor_face = torch.from_numpy(normalized_face.transpose((2, 0, 1))).unsqueeze(0).float()
+        with torch.no_grad():
+            detected_embedding = resnet(tensor_face).detach().numpy().flatten()
+        similarities = cosine_similarity([detected_embedding], known_embeddings)
+        max_similarity_index = np.argmax(similarities)
+        max_similarity = similarities[0, max_similarity_index]
+        if max_similarity > 0.7:
+            identity = embeddings_df.iloc[max_similarity_index]['label']
+            recognized_faces[identity] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+
+            # Draw bounding box around the detected face
+            cv2.rectangle(image, (x, y), (x+w, y+h), (0, 255, 0), 2)
+            cv2.putText(image, identity, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36,255,12), 2)
+
+    return recognized_faces
+
+# Function to write attendance to CSV
+def write_to_csv(recognized_faces):
+    try:
+        with open('attendance.csv', mode='a', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(['Identity', 'Timestamp'])
+            for identity, timestamp in recognized_faces.items():
+                writer.writerow([identity, timestamp])
+        print("Attendance sheet created successfully.")
+    except PermissionError as e:
+        st.error(f"Permission denied: {e}")
+
+# Function to display attendance as a table
+def display_attendance_table(attendance):
+    if attendance:
+        st.subheader("Attendance Table")
+        data = []
+        for key, value in attendance.items():
+            name, roll_number = key.split('_')
+            data.append({'Name': name, 'Roll Number': roll_number, 'Timestamp': value})
+        df = pd.DataFrame(data)
+        st.dataframe(df)
+    else:
+        st.warning("No attendance recorded yet.")
+
+# Function to extract embedding from an image
+def extract_embedding(image, detector, resnet):
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    detections = detector.detect_faces(image_rgb)
+    if detections:
+        face_box = detections[0]['box']
+        x, y, w, h = face_box
+        face = image[y:y+h, x:x+w]
+        resized_face = cv2.resize(face, (160, 160))
+        normalized_face = resized_face / 255.0
+        tensor_face = torch.from_numpy(normalized_face.transpose((2, 0, 1))).unsqueeze(0).float()
+        embedding = resnet(tensor_face).detach().numpy().flatten()
+        return embedding
+    else:
+        return None
+
+def capture_photos(video_capture, name, roll_number, parent_folder, embeddings_df, num_photos_per_person=15, interval=3):
+    st.write("Please move your head from left to right.")
+    registration_folder = os.path.join(parent_folder, f"{name}_{roll_number}")
+    os.makedirs(registration_folder, exist_ok=True)
+    photos = []
+    embeddings = []
+    total_photos = num_photos_per_person  # Total photos to capture for each person
+
+    # Loop to capture photos
+    for i in range(total_photos):
+        ret, frame = video_capture.read()
+        if ret:
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame_small = cv2.resize(frame_rgb, (0, 0), fx=0.5, fy=0.5)
+            detections = detector.detect_faces(frame_small)
+            if detections:
+                face_box = detections[0]['box']
+                x, y, w, h = [i * 2 for i in face_box]  # Scale up the coordinates
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0), 2)
+            else:
+                cv2.putText(frame, "No face detected", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2,
+                            cv2.LINE_AA)
+
+            photos.append(frame_rgb)
+            embeddings.append(extract_embedding(frame, detector, resnet))
+
+            st.image(frame, channels="RGB")
+            time.sleep(interval)
+
+    # Save the captured photos and embeddings
+    for i, (photo, embedding) in enumerate(zip(photos, embeddings)):
+        photo_path = os.path.join(registration_folder, f"{name}_{roll_number}_{i}.jpg")
+        cv2.imwrite(photo_path, cv2.cvtColor(photo, cv2.COLOR_RGB2BGR))
+        embeddings_df = embeddings_df.append({'label': f"{name}_{roll_number}", 'embedding': embedding}, ignore_index=True)
+
+    return embeddings_df
+
+def main():
+    st.title("Attendance System")
+
+    # Sidebar
+    option = st.sidebar.selectbox("Choose an option", ["Register", "Take Attendance"])
+
+    if option == "Register":
+        st.subheader("Registration")
+        name = st.text_input("Enter your name:")
+        roll_number = st.text_input("Enter your roll number:")
+        video_capture = cv2.VideoCapture(0)
+
+        if st.button("Start Registration"):
+            embeddings_df = pd.DataFrame(columns=['label', 'embedding'])
+            embeddings_df = capture_photos(video_capture, name, roll_number, 'registration', embeddings_df)
+            embeddings_df.to_csv('embeddings.csv', index=False)
+
+    elif option == "Take Attendance":
+        st.subheader("Attendance")
+        video_capture = cv2.VideoCapture(0)
+        embeddings_df = pd.read_csv('embeddings.csv')
+        known_embeddings = np.array(embeddings_df['embedding'].tolist())
+
+        recognized_faces = {}
+        while True:
+            ret, frame = video_capture.read()
+            if ret:
+                frame = preprocess_image(frame)
+                recognized_faces = detect_and_recognize_faces(frame, embeddings_df, known_embeddings, detector, resnet)
+                cv2.imshow('Attendance System', frame)
+
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    break
+
+        video_capture.release()
+        cv2.destroyAllWindows()
+
+        # Delay before marking attendance
+        time.sleep(4)
+        write_to_csv(recognized_faces)
+        display_attendance_table(recognized_faces)
+
+if __name__ == "__main__":
+    main()
